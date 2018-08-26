@@ -29,7 +29,7 @@ parser.add_argument("--seed", default=1, type=int)
 parser.add_argument("--train", default=False, type=lambda x: (str(x).lower() == 'true'))
 
 parser.add_argument("--train_steps", default=1000, type=int)
-parser.add_argument("--infer_steps", default=100, type=int)
+parser.add_argument("--infer_steps", default=1000, type=int)
 parser.add_argument("--learning_rate", default=1e-2, type=float)
 parser.add_argument("--batch_size", default=2, type=int)
 parser.add_argument("--n_tasks", default=6, type=int)
