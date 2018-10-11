@@ -8,5 +8,6 @@
 
 - [x] Refactor Model Learning code
 - [x] Add Toy Example
-- [] Refactor RL Code
-- [] Add Cartpole Experiments
+- [ ] Clean up README
+- [ ] Refactor RL Code
+- [ ] Add Cartpole Experiments
