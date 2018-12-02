@@ -1,105 +1,116 @@
 import numpy as np
-from utils import mu_std, norm
+from func_utils import mu_std
 
 
-class MultiTaskData:
+class MultiEnvData:
 
-    def __init__(
-        self, X, Y, D, n_data, n_tasks, n_train_tasks,
-            dim_in, dim_out, normalize=True):
+    def __init__(self):
 
-        assert X.shape[0] == n_tasks
-        assert X.shape[1] == n_data
-        assert X.shape[2] == dim_in
-        assert Y.shape[0] == n_tasks
-        assert Y.shape[1] == n_data
-        assert Y.shape[2] == dim_out
+        self.trajectories = {}
+        self.rewards = {}
+        self.data = {}
+        self.num_envs = 0
 
-        self.data = {
-            "training": {"X": None, "Y": None, "ids": None},
-            "test": {"X": None, "Y": None, "ids": None},
-            "domain": D}
+    def add_observations(self, states, actions, id):
 
-        self.n_data = n_data
-        self.n_train_data = n_train_tasks * n_data
-        self.n_tasks = n_tasks
-        self.n_train_tasks = n_train_tasks
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-        self.normalized = normalize
+        trajectory_data = {}
+        trajectory_data["states"] = states
+        trajectory_data["actions"] = actions
 
-        self._prepare_data(X, Y, n_train_tasks, normalize=normalize)
+        if id in self.trajectories:
+            self.trajectories[id].append(trajectory_data)
+        else:
+            self.trajectories[id] = [trajectory_data]
+            self.num_envs += 1
 
-    def _prepare_data(self, X, Y, n_train, normalize=True):
+    def get_inputs_outputs(self, states, actions):
+        states_transf = self.state_transform(states)
+        inputs = np.hstack([states_transf[:-1], actions])
+        outputs = states[1:] - states[:-1]
+        return inputs, outputs
 
-        X_train, Y_train = X[:n_train], Y[:n_train]
-        X_test, Y_test = X[n_train:], Y[n_train:]
+    def prepare_data(self):
 
-        if normalize:
-            X_mu, X_std = mu_std(X_train)
-            Y_mu, Y_std = mu_std(Y_train)
+        all_input_traj = []
+        all_output_traj = []
+        all_ids_traj = []
+        n_episodes = 0
+        for eid in self.trajectories:
+            episodes = self.trajectories[eid]
+            for ep, ep_data in enumerate(episodes):
+                states = ep_data["states"]
+                actions = ep_data["actions"]
+                inputs, outputs = self.get_inputs_outputs(states, actions)
+                ids = np.int32(inputs.shape[0] * [eid])
 
-            X_train = norm(X_train, X_mu, X_std)
-            X_test = norm(X_test, X_mu, X_std)
-            Y_train = norm(Y_train, Y_mu, Y_std)
-            Y_test = norm(Y_test, Y_mu, Y_std)
+                all_input_traj.append(inputs)
+                all_output_traj.append(outputs)
+                all_ids_traj.append(ids.reshape(-1, 1))
+                n_episodes += 1
 
-        #ids = np.int32(np.arange(self.n_tasks))
-        #np.random.shuffle(ids)
-        #train_ids = ids[:n_train]
-        #test_ids = ids[n_train:]
+        all_inputs = np.vstack(all_input_traj)
+        all_outputs = np.vstack(all_output_traj)
 
-        train_ids = np.int32(list(range(n_train)))
-        test_ids = np.int32(list(range(n_train, X.shape[0])))
+        inp_mu, inp_std = mu_std(all_inputs)
+        out_mu, out_std = mu_std(all_outputs)
 
-        self.data["training"]["X"] = X_train
-        self.data["training"]["Y"] = Y_train
-        self.data["training"]["ids"] = train_ids
-        self.data["test"]["X"] = X_test
-        self.data["test"]["Y"] = Y_test
-        self.data["test"]["ids"] = test_ids
+        norm = lambda inp, mu, std: (inp - mu) / std
+        inp_norm = [norm(inp, inp_mu, inp_std) for inp in all_input_traj]
+        out_norm = [norm(out, out_mu, out_std) for out in all_output_traj]
 
-        self.X_mu = X_mu
-        self.X_std = X_std
-        self.Y_mu = Y_mu
-        self.Y_std = Y_std
+        n_data = all_inputs.shape[0]
 
-    def get_domain(self, n_tasks):
+        self.data["n_data"] = n_data
+        self.data["n_episodes"] = n_episodes
+        self.data["inputs"] = inp_norm
+        self.data["outputs"] = out_norm
+        self.data["ids"] = all_ids_traj
+        self.data["inp_mu"] = inp_mu
+        self.data["inp_std"] = inp_std
+        self.data["out_mu"] = out_mu
+        self.data["out_std"] = out_std
 
-        D = np.expand_dims(self.data["domain"], 0)
-        if self.normalized:
-            D = norm(D, self.X_mu, self.X_std)
-        return np.tile(D, [n_tasks, 1, 1])
+    def get_seq_batch(self, seq, si, ei):
 
-    def get_raw_data(self, set):
+        inp_seq = self.data["inputs"]
+        out_seq = self.data["outputs"]
+        ids_seq = self.data["ids"]
+        inp_seq = [inp_seq[i] for i in seq]
+        out_seq = [out_seq[i] for i in seq]
+        ids_seq = [ids_seq[i] for i in seq]
+        D = inp_seq[0].shape[1]
+        E = out_seq[0].shape[1]
 
-        X = self.data[set]["X"]
-        Y = self.data[set]["Y"]
-        if self.normalized:
-            X = (X * self.X_std) + X_mu
-            Y = (Y * self.Y_std) + Y_mu
+        X_b = np.vstack(inp_seq[si:ei]).reshape(-1, D)
+        Y_b = np.vstack(out_seq[si:ei]).reshape(-1, E)
+        ids_b = np.vstack(ids_seq[si:ei]).reshape(-1)
+        ids_unique = np.unique(ids_b)
 
-        return X, Y
+        return X_b, Y_b, ids_b, ids_unique
 
-    def get_batch(self, seq, si, ei, set="training"):
+    def state_transform(self, states):
+        return states
 
-        X_b = self.data[set]["X"][seq][si:ei].reshape(-1, self.dim_in)
-        Y_b = self.data[set]["Y"][seq][si:ei].reshape(-1, self.dim_out)
-        ids_b = self.data[set]["ids"][seq]
 
-        num_steps = self.n_data
-        num_tasks = len(ids_b)
-        data_scale = (num_steps * num_tasks) / self.n_train_data
-        task_scale =  num_tasks / self.n_train_tasks
+class MultiEnvData_Pendulum(MultiEnvData):
 
-        return X_b, Y_b, ids_b, num_steps, data_scale, task_scale
+    def state_transform(self, states):
 
-    def get_task(self, task, num_steps, set="training"):
+        states_transf = np.zeros((states.shape[0], states.shape[1]+1))
+        states_transf[:, 0] = np.cos(states[:, 0])
+        states_transf[:, 1] = np.sin(states[:, 0])
+        states_transf[:, 2] = states[:, 1]
+        return states_transf
 
-        X_b = self.data[set]["X"][task].reshape(-1, self.dim_in)[:num_steps]
-        Y_b = self.data[set]["Y"][task].reshape(-1, self.dim_out)[:num_steps]
 
-        data_scale = num_steps / self.n_train_data
-        task_scale =  1. / self.n_train_tasks
+class MultiEnvData_Cartpole(MultiEnvData):
 
-        return X_b, Y_b, data_scale, task_scale
+    def state_transform(self, states):
+
+        states_transf = np.zeros((states.shape[0], states.shape[1]+1))
+        states_transf[:, 0] = np.cos(states[:, 0])
+        states_transf[:, 1] = np.sin(states[:, 0])
+        states_transf[:, 2] = states[:, 1]
+        states_transf[:, 3] = states[:, 2]
+        states_transf[:, 4] = states[:, 3]
+        return states_transf

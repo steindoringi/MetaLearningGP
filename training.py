@@ -2,6 +2,49 @@ import tensorflow as tf
 import gpflow
 import numpy as np
 
+from tensorflow.contrib.opt import ScipyOptimizerInterface as ScipyOpt
+
+
+def initialize_model(model, objective, session, learning_rate):
+
+    model.initialize(session=session, force=False)
+
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+    model_vars = model.trainable_tensors
+    model_task_vars = [var for var in model_vars if "H" in var.name]
+    train_step = optimizer.minimize(objective, var_list=model_vars)
+    if model.name == "MLSVGP":
+        task_infer_step = optimizer.minimize(objective, var_list=model_task_vars)
+    else:
+        task_infer_step = None
+
+    session.run(tf.variables_initializer(optimizer.variables()))
+
+    return train_step, task_infer_step, optimizer
+
+def initialize_policy(agent, objective, session):
+
+    agent.policy.initialize(session=session, force=False)
+
+    policy_vars = [v for v in agent.trainable_tensors if "policy" in v.name][0]
+    var_to_bounds = {}
+    var_to_bounds[policy_vars] = (-1., 1.)
+    agent_opt = ScipyOpt(
+        objective,
+        options={"disp": False, "ftol": 1e-4},
+        var_list=[policy_vars],
+        var_to_bounds=var_to_bounds,
+        method="SLSQP"
+        #method="L-BFGS-B"
+        )
+
+    return agent_opt
+
+
+
+
+
+
 
 def initialize_training(model, objective, ARGS):
 

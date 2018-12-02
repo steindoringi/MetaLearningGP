@@ -16,7 +16,7 @@
 import tensorflow as tf
 
 from gpflow import settings, mean_functions
-from gpflow.decors import name_scope
+from gpflow.decors import name_scope, params_as_tensors_for
 from gpflow.dispatch import conditional, sample_conditional
 from gpflow.expectations import expectation
 from gpflow.features import Kuu, Kuf, InducingPoints, InducingFeature
@@ -171,6 +171,7 @@ def base_conditional(Kmn, Kmm, Knn, f, *, full_cov=False, q_sqrt=None, white=Fal
     :param white: bool
     :return: N x R  or R x N x N
     """
+
     logger.debug("base conditional")
     # compute kernel stuff
     num_func = tf.shape(f)[1]  # R
@@ -254,15 +255,12 @@ def uncertain_conditional(Xnew_mu, Xnew_var, feat, kern, q_mu, q_sqrt, *, Luu=No
         # This is not implemented as this feature is only used for plotting purposes.
         raise NotImplementedError
 
-    pXnew = Gaussian(Xnew_mu, Xnew_var)
-
     num_data = tf.shape(Xnew_mu)[0]  # number of new inputs (N)
     num_ind = tf.shape(q_mu)[0]  # number of inducing points (M)
     num_func = tf.shape(q_mu)[1]  # output dimension (D)
 
     q_sqrt_r = tf.matrix_band_part(q_sqrt, -1, 0)  # D x M x M
 
-    eKuf = tf.transpose(expectation(pXnew, (kern, feat)))  # M x N (psi1)
     if Luu is None:
         Kuu = feat.Kuu(kern, jitter=settings.numerics.jitter_level)  # M x M
         Luu = tf.cholesky(Kuu)  # M x M
@@ -272,8 +270,43 @@ def uncertain_conditional(Xnew_mu, Xnew_var, feat, kern, q_mu, q_sqrt, *, Luu=No
         Luu_tiled = tf.tile(Luu[None, :, :], [num_func, 1, 1])  # remove line once issue 216 is fixed
         q_sqrt_r = tf.matrix_triangular_solve(Luu_tiled, q_sqrt_r, lower=True)
 
+    lengthscales = kern.lengthscales if kern.ARD \
+        else tf.zeros((tf.shape(Xnew_mu)[0],), dtype=settings.float_type) + kern.lengthscales
+
+    chol_L_plus_Xcov = tf.cholesky(tf.matrix_diag(lengthscales ** 2) + Xnew_var)  # NxDxD
+    all_diffs = tf.transpose(feat.Z) - tf.expand_dims(Xnew_mu, 2)  # NxDxM
+
+    sqrt_det_L = tf.reduce_prod(lengthscales)
+    sqrt_det_L_plus_Xcov = tf.exp(tf.reduce_sum(tf.log(tf.matrix_diag_part(chol_L_plus_Xcov)), axis=1))
+    determinants = sqrt_det_L / sqrt_det_L_plus_Xcov  # N
+
+    exponent_mahalanobis = tf.cholesky_solve(chol_L_plus_Xcov, all_diffs)  # NxDxM
+
+    non_exponent_term = exponent_mahalanobis
+    #non_exponent_term = tf.matmul(Xnew_var, exponent_mahalanobis, transpose_a=True)
+
+    non_exponent_term = tf.expand_dims(Xnew_mu, 2) + non_exponent_term  # NxDxM
+
+    exponent_mahalanobis = tf.reduce_sum(all_diffs * exponent_mahalanobis, 1)  # NxM
+    exponent_mahalanobis = tf.exp(-0.5 * exponent_mahalanobis)  # NxM
+
+    eKuf = kern.variance * (determinants[:, None] * exponent_mahalanobis)
+    exKuf = kern.variance * (determinants[:, None] * exponent_mahalanobis)[:, None, :] * non_exponent_term
+
+    eKuf = tf.transpose(eKuf)
+    exKuf = tf.transpose(exKuf)
+
+    pXnew = Gaussian(Xnew_mu, Xnew_var)
+
     Li_eKuf = tf.matrix_triangular_solve(Luu, eKuf, lower=True)  # M x N
+    Luu_tile = tf.tile(Luu[None, :, :], [tf.shape(Xnew_mu)[1], 1, 1])
+    Li_exKuf = tf.matrix_triangular_solve(Luu_tile, tf.transpose(exKuf, [1, 0, 2]), lower=True)  # D x M x N
+
     fmean = tf.matmul(Li_eKuf, q_mu, transpose_a=True)
+    q_mu_tile = tf.tile(q_mu[None, :, :], [tf.shape(Xnew_mu)[1], 1, 1])
+    cross_cov_terms = tf.matmul(Li_exKuf, q_mu_tile, transpose_a=True)
+    cross_cov_terms = tf.transpose(cross_cov_terms, [1, 0, 2])
+    cross_cov_terms = cross_cov_terms - tf.matmul(Xnew_mu, fmean, transpose_a=True)
 
     eKff = expectation(pXnew, kern)  # N (psi0)
     eKuffu = expectation(pXnew, (kern, feat), (kern, feat))  # N x M x M (psi2)
@@ -317,7 +350,7 @@ def uncertain_conditional(Xnew_mu, Xnew_var, feat, kern, q_mu, q_sqrt, *, Luu=No
                 tf.matrix_diag_part(e_related_to_mean)
         )
 
-    return fmean, fvar
+    return fmean, fvar, cross_cov_terms
 
 
 # ---------------------------------------------------------------
