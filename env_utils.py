@@ -38,17 +38,17 @@ def get_envs(**kwargs):
     if kwargs["env"] == "PendulumEnv":
 
         training_env_params = [
-            (0.5, 0.5),
             (0.7, 0.7),
-            (0.5, 0.7),
-            (0.7, 0.5)
+            (0.9, 0.9),
+            (0.7, 0.9),
+            (0.9, 0.7)
         ]
 
         test_env_params = [
-            (0.6, 0.6),
             (0.8, 0.8),
-            (0.6, 0.8),
-            (0.8, 0.6)
+            (1.0, 1.0),
+            (0.8, 1.0),
+            (1.0, 0.8)
         ]
 
         training_envs, test_envs = get_env_names(
