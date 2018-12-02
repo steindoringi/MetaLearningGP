@@ -93,18 +93,6 @@ def run_PILCO(pilco, training_envs, test_envs, **kwargs):
 
 if __name__ == "__main__":
 
-    """ ToDo:
-    - Final clean up
-    -- Plotting
-    -- Cost functions
-    - Pendulum for easier demo
-    - Toy data?
-    -----
-    - Application
-    - Email (Katja)
-
-    """
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--env", default="CartpoleSwingup", type=str)
