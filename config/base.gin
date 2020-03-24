@@ -1,0 +1,41 @@
+# Main
+main.train_flag = True
+main.inf_flag = True
+main.eval_flag = True
+
+# Toy Data
+create_toy_dataset.num_tasks = 9
+create_toy_dataset.num_data_per_task = 500
+create_toy_dataset.noise_std = 0.1
+create_toy_dataset.standardise = False
+
+# Model
+create_model.num_inducing = 100
+create_model.dim_latent = 1
+create_model.multi_output = False
+
+# Training
+train.learning_rate = 1e-3
+train.num_epochs = 500
+train.batch_size = 50
+
+train.reshuffle = True
+train.shuffle_buffer = 10000
+
+train.restore_weights = True
+train.save_every = 50000
+train.min_delta = 1e-6
+train.patience = 100
+
+# Meta Inference
+meta_inference.num_inf_obs = 10
+meta_inference.learning_rate = 3e-4
+meta_inference.num_epochs = 5000
+meta_inference.batch_size = 50
+meta_inference.reshuffle = True
+meta_inference.shuffle_buffer = 10000
+meta_inference.restore_weights = True
+meta_inference.save_every = 50000
+
+# Eval
+eval_model.sample = False
